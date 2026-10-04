@@ -60,7 +60,7 @@ cd frontend
 npm run dev
 ```
 
-The Vite dev server (`localhost:5173`) proxies API calls to the backend (`localhost:8000`).
+The Vite dev server (`localhost:7000`) proxies API calls to the backend (`localhost:8000`).
 
 ---
 

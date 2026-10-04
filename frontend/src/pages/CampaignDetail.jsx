@@ -7,6 +7,7 @@ import { Button } from '../components/ui/Button';
 import { FileUploadArea } from '../components/ui/FileUploadArea';
 import { Card } from '../components/ui/Card';
 import DatePicker from '../components/ui/DatePicker';
+import WeekdayPicker from '../components/ui/WeekdayPicker';
 import { useConfirm } from '../context/ConfirmContext';
 import { useAppMode } from '../context/AppModeContext';
 import {
@@ -608,11 +609,18 @@ function LeadsTab({ leads, campaignId, refresh, onViewQueue }) {
       catch { setMsg({ type: 'error', text: 'Custom data must be valid JSON' }); return; }
     }
     try {
-      await api.post(`/campaigns/${campaignId}/leads`, [{
+      const result = await api.post(`/campaigns/${campaignId}/leads?skip_duplicates=${skipDuplicates}`, [{
         email: single.email.trim(),
         name: single.name.trim() || undefined,
         custom_data,
       }]);
+      if (!result.added) {
+        const detail = result.results?.find(item => item.status === 'error')?.detail;
+        setMsg({ type: 'error', text: detail || (skipDuplicates
+          ? 'Lead not added: this email is already enrolled in a campaign. Uncheck Skip duplicates to add it to this campaign too.'
+          : 'Lead not added: this email is already enrolled in this campaign.') });
+        return;
+      }
       setSingle({ email: '', name: '', custom: '' });
       notify({ type: 'success', message: 'Lead added' });
       refresh();
@@ -1808,7 +1816,7 @@ function SettingsTab({ campaign, inboxes, onSave, campaignId }) {
   const [form, setForm] = useState({
     name:                  campaign.name,
     inbox_ids:             campaign.inbox_ids         || [],
-    sending_days:          campaign.sending_days      || [0,1,2,3,4],
+    sending_days:          campaign.sending_days?.some(d => typeof d === 'string') ? campaign.sending_days : [new Date().toISOString().slice(0, 10)],
     sending_hours_start:   campaign.sending_hours_start || '09:00',
     sending_hours_end:     campaign.sending_hours_end   || '17:00',
     stop_on_reply:         campaign.stop_on_reply,
@@ -1826,6 +1834,7 @@ function SettingsTab({ campaign, inboxes, onSave, campaignId }) {
   const [msg,    setMsg]    = useState(null);
   const [saving, setSaving] = useState(false);
   const [tzSearch, setTzSearch] = useState(null); // null = not focused
+  const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   // pre-compute timezone list once
   const tzList = useMemo(() => {
@@ -1846,13 +1855,17 @@ function SettingsTab({ campaign, inboxes, onSave, campaignId }) {
     ? tzList.filter(t => t.label.toLowerCase().includes(tzSearch.toLowerCase()))
     : tzList;
 
-  const toggleDay   = d  => setForm(f => { const s=new Set(f.sending_days); s.has(d)?s.delete(d):s.add(d); return {...f, sending_days:[...s].sort()}; });
   const toggleInbox = id => setForm(f => { const s=new Set(f.inbox_ids);   s.has(id)?s.delete(id):s.add(id); return {...f, inbox_ids:[...s]}; });
 
   const submit = async e => {
     e.preventDefault();
     if (!form.name.trim())          { setMsg({type:'error',text:'Name is required'});           return; }
     if (!form.inbox_ids.length)     { setMsg({type:'error',text:'Select at least one inbox'});  return; }
+    if (!form.sending_days.length)  { setMsg({type:'error',text:'Select at least one sending day'}); return; }
+    if (form.sending_hours_start >= form.sending_hours_end) {
+      setMsg({type:'error',text:'The sending window end must be later than its start'});
+      return;
+    }
     setSaving(true);
     try {
       await api.patch(`/campaigns/${campaignId}`, form);
@@ -1968,15 +1981,8 @@ function SettingsTab({ campaign, inboxes, onSave, campaignId }) {
 
         {/* Sending days */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Sending days</label>
-          <div className="flex flex-wrap gap-3">
-            {[0,1,2,3,4,5,6].map(d => (
-              <label key={d} className="flex items-center gap-1.5 cursor-pointer text-sm">
-                <input type="checkbox" checked={form.sending_days.includes(d)} onChange={()=>toggleDay(d)} />
-                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d]}
-              </label>
-            ))}
-          </div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Send dates</label>
+          <WeekdayPicker value={form.sending_days} onChange={sending_days => setForm(f => ({ ...f, sending_days }))} />
         </div>
 
         {/* Hours */}
@@ -1989,6 +1995,8 @@ function SettingsTab({ campaign, inboxes, onSave, campaignId }) {
               <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
               <input
                 type="time"
+                step="900"
+                aria-label={label}
                 className="w-full border rounded-lg px-3 py-2 text-sm"
                 value={form[key]}
                 onChange={e => setForm(f=>({...f, [key]: e.target.value}))}
@@ -2343,9 +2351,16 @@ function PreviewModal({ sequence, campaignId, leads, onClose, variant = null, ed
                   <pre className="border rounded-lg p-5 bg-gray-50 text-sm whitespace-pre-wrap font-sans text-gray-800">
                     {preview.body}
                   </pre>
-                )}
-              </div>
-            </div>
+            )}
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="text-xs text-gray-400">Sending hours are interpreted in this timezone.</p>
+            <button type="button" className="text-xs font-medium text-teal-600 hover:text-teal-800"
+              onClick={() => { setForm(f => ({ ...f, timezone: deviceTimezone })); setTzSearch(null); }}>
+              Use my device timezone
+            </button>
+          </div>
+        </div>
           )}
         </div>
 

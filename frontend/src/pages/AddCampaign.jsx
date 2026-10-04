@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { api, apiCache } from '../api';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
+import WeekdayPicker from '../components/ui/WeekdayPicker';
 
 export default function AddCampaign() {
   const [inboxes, setInboxes] = useState(() => apiCache.get('/inboxes') || []);
   const [form, setForm] = useState({
     name: '',
     inbox_ids: [],
-    sending_days: [0,1,2,3,4],
+    sending_days: [new Date().toISOString().slice(0, 10)],
     sending_hours_start: '09:00',
     sending_hours_end: '17:00',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -28,6 +29,7 @@ export default function AddCampaign() {
   const [message, setMessage] = useState(null);
   const [tzSearch, setTzSearch] = useState('');
   const navigate = useNavigate();
+  const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   const tzList = useMemo(() => {
     return Intl.supportedValuesOf('timeZone').map(tz => {
@@ -60,13 +62,6 @@ export default function AddCampaign() {
         if (checked) ids.add(id); else ids.delete(id);
         return { ...f, inbox_ids: Array.from(ids) };
       });
-    } else if (name === 'day') {
-      const day = parseInt(value, 10);
-      setForm(f => {
-        const days = new Set(f.sending_days);
-        if (checked) days.add(day); else days.delete(day);
-        return { ...f, sending_days: Array.from(days).sort() };
-      });
     }
   }
 
@@ -77,6 +72,14 @@ export default function AddCampaign() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!form.sending_days.length) {
+      setMessage({ type: 'error', text: 'Select at least one sending day.' });
+      return;
+    }
+    if (form.sending_hours_start >= form.sending_hours_end) {
+      setMessage({ type: 'error', text: 'The sending window end must be later than its start.' });
+      return;
+    }
     try {
       const data = await api.post('/campaigns', form);
       setMessage({ type: 'success', text: `Campaign created. ` });
@@ -126,29 +129,16 @@ export default function AddCampaign() {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700">Sending days</label>
-          <div className="mt-1 flex flex-wrap gap-2">
-            {[0,1,2,3,4,5,6].map(d => (
-              <label key={d} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  name="day"
-                  value={d}
-                  checked={form.sending_days.includes(d)}
-                  onChange={handleCheckboxChange}
-                />
-                <span className="text-sm">
-                  {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d]}
-                </span>
-              </label>
-            ))}
-          </div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Send dates</label>
+          <WeekdayPicker value={form.sending_days} onChange={sending_days => setForm(f => ({ ...f, sending_days }))} />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Sending window start</label>
             <input
               type="time"
+              step="900"
+              aria-label="Sending window start"
               name="sending_hours_start"
               value={form.sending_hours_start}
               onChange={handleChange}
@@ -159,6 +149,8 @@ export default function AddCampaign() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Sending window end</label>
             <input
               type="time"
+              step="900"
+              aria-label="Sending window end"
               name="sending_hours_end"
               value={form.sending_hours_end}
               onChange={handleChange}
@@ -196,7 +188,13 @@ export default function AddCampaign() {
               </ul>
             )}
           </div>
-          <p className="text-xs text-gray-400 mt-1">Sending hours above are interpreted in this timezone</p>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="text-xs text-gray-400">Sending hours are interpreted in this timezone.</p>
+            <button type="button" className="text-xs font-medium text-teal-600 hover:text-teal-800"
+              onClick={() => setForm(f => ({ ...f, timezone: deviceTimezone }))}>
+              Use my device timezone
+            </button>
+          </div>
         </div>
         <div>
           <label className="flex items-center gap-2">

@@ -169,15 +169,19 @@ def _in_sending_window(now_utc: datetime, campaign: Campaign) -> bool:
     if ZoneInfo and tz_name:
         try:
             tz = ZoneInfo(tz_name)
-            # now_utc is a naive datetime from time_provider.now() which
-            # returns server-local time; in Docker that equals UTC.
+            # The worker supplies naive UTC, independent of the host timezone.
             now_local = now_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz).replace(tzinfo=None)
         except Exception:
             now_local = now_utc
     else:
         now_local = now_utc
 
-    if campaign.sending_days is None or now_local.weekday() not in campaign.sending_days:
+    selected_dates = [d for d in (campaign.sending_days or []) if isinstance(d, str)]
+    if selected_dates:
+        allowed_today = now_local.date().isoformat() in selected_dates
+    else:
+        allowed_today = now_local.weekday() in (campaign.sending_days or [])
+    if not allowed_today:
         return False
     start = _parse_time(campaign.sending_hours_start or "09:00")
     end = _parse_time(campaign.sending_hours_end or "17:00")
@@ -187,9 +191,9 @@ def _in_sending_window(now_utc: datetime, campaign: Campaign) -> bool:
 async def run_send_job():
     """Run once: send today's due emails. Slots are per inbox (QueueSlot.inbox_id)."""
     global last_send_job_run, last_send_job_sent_count
-    # Use local time so we match queue_logic (slots are stored in local time) and sending window (09:00–17:00 is local)
-    now = time_provider.now()
-    log.info("Send job running at %s (local)", now.isoformat())
+    # Queue and email log timestamps are stored in UTC.
+    now = time_provider.utcnow()
+    log.info("Send job running at %s (UTC)", now.isoformat())
 
     async with AsyncSessionLocal() as session:
         today = now.date()
@@ -1130,7 +1134,7 @@ async def send_slot_job(slot_id: int) -> None:
     """
     global last_send_job_run, last_send_job_sent_count
 
-    now = time_provider.now()
+    now = time_provider.utcnow()
     log.info("send_slot_job: slot_id=%d firing at %s", slot_id, now.isoformat())
 
     async with AsyncSessionLocal() as session:
@@ -1898,7 +1902,10 @@ async def run_slot_scan_job() -> None:
     ``_pending_slot_ids`` prevents double-dispatch when two scan ticks see the
     same slot inside their overlapping 60-second windows.
     """
-    now = time_provider.now()
+    # QueueSlot.scheduled_date is persisted as a naive UTC timestamp. Use the
+    # same UTC clock for the scan; the send worker converts to campaign local
+    # time only when checking the sending window.
+    now = time_provider.utcnow()
     window_end = now + timedelta(seconds=60)
 
     async with AsyncSessionLocal() as session:

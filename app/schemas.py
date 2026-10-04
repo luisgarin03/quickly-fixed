@@ -1,6 +1,6 @@
 """Pydantic schemas for API and validation."""
 from pydantic import AliasChoices, BaseModel, EmailStr, Field
-from typing import Literal, Optional, Dict, Any, List
+from typing import Literal, Optional, Dict, Any, List, Union
 from datetime import datetime, time
 from app.models import WEBHOOK_EVENT_TYPES
 
@@ -278,7 +278,7 @@ class CustomEmailWrite(BaseModel):
 class CampaignCreate(BaseModel):
     name: str
     inbox_ids: List[int]  # at least one; order = priority for slot assignment
-    sending_days: List[int] = [0, 1, 2, 3, 4]  # Mon=0 .. Sun=6
+    sending_days: List[Union[int, str]] = [0, 1, 2, 3, 4]  # legacy weekdays or ISO dates
     sending_hours_start: str = "09:00"
     sending_hours_end: str = "17:00"
     stop_on_reply: bool = True
@@ -306,7 +306,7 @@ class CampaignCreate(BaseModel):
 class CampaignUpdate(BaseModel):
     name: Optional[str] = None
     inbox_ids: Optional[List[int]] = None
-    sending_days: Optional[List[int]] = None
+    sending_days: Optional[List[Union[int, str]]] = None
     sending_hours_start: Optional[str] = None
     sending_hours_end: Optional[str] = None
     stop_on_reply: Optional[bool] = None
@@ -365,7 +365,7 @@ class CampaignResponse(BaseModel):
     public_id: str
     name: str
     inbox_ids: List[int]
-    sending_days: List[int]
+    sending_days: List[Union[int, str]]
     sending_hours_start: str
     sending_hours_end: str
     stop_on_reply: bool

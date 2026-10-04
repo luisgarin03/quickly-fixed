@@ -166,7 +166,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 import os as _os
 from fastapi.middleware.cors import CORSMiddleware
 
-_cors_origins_str = _os.getenv("CORS_ORIGINS", "http://localhost:5173")
+_cors_origins_str = _os.getenv("CORS_ORIGINS", "http://localhost:7000")
 _cors_origins = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
 
 app.add_middleware(

@@ -146,7 +146,13 @@ export default function DatePicker({ value, onChange, className = '' }) {
           <div className="mt-2 pt-2 border-t flex justify-center">
             <button
               type="button"
-              onClick={() => selectDate(new Date().getDate())}
+              onClick={() => {
+                const now = new Date();
+                setViewYear(now.getFullYear());
+                setViewMonth(now.getMonth());
+                onChange(today);
+                setOpen(false);
+              }}
               className="text-xs text-teal-600 hover:text-teal-800 font-medium"
             >
               Today

@@ -243,6 +243,9 @@ async def _next_available_send_time_today(
     # Round up to next grid: start_min + k * wait_minutes >= base
     k = 0 if base <= start_min else ((base - start_min + wait_minutes - 1) // wait_minutes)
     candidate_min = start_min + k * wait_minutes
+    # With no reserved sends, spacing does not require a window-start grid.
+    if not existing_minutes and candidate_min > end_min:
+        candidate_min = base
     while candidate_min <= end_min:
         if candidate_min not in existing_minutes and candidate_min >= now_min:
             # Return campaign-tz naive datetime; caller converts to UTC
@@ -252,18 +255,41 @@ async def _next_available_send_time_today(
 
 
 
-def next_business_date(from_date: date, sending_days: List[int], delta_days: int) -> date:
-    """Advance from_date by delta_days counting only business days (in sending_days)."""
+def _scheduled_on(value, day: date) -> bool:
+    explicit = [v for v in (value or []) if isinstance(v, str)]
+    return day.isoformat() in explicit if explicit else day.weekday() in (value or [])
+
+
+def _next_scheduled_date(value, current: date) -> date | None:
+    explicit = sorted(date.fromisoformat(v) for v in (value or []) if isinstance(v, str) and v > current.isoformat())
+    if explicit:
+        return explicit[0]
+    if any(isinstance(v, str) for v in (value or [])):
+        return None
+    candidate = current + timedelta(days=1)
+    while candidate.weekday() not in (value or []):
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def next_business_date(from_date: date, sending_days: List[int | str], delta_days: int) -> date:
+    """Advance through explicit selected dates, with legacy weekday fallback."""
+    explicit = sorted(date.fromisoformat(v) for v in (sending_days or []) if isinstance(v, str))
+    if explicit:
+        candidates = [d for d in explicit if d >= from_date]
+        if delta_days > 0:
+            candidates = [d for d in explicit if d > from_date]
+        return candidates[min(delta_days, len(candidates) - 1)] if candidates else explicit[-1]
     if delta_days <= 0:
         d = from_date
-        while d.weekday() not in sending_days:
+        while not _scheduled_on(sending_days, d):
             d += timedelta(days=1)
         return d
     count = 0
     d = from_date
     while count < delta_days:
         d += timedelta(days=1)
-        if d.weekday() in sending_days:
+        if _scheduled_on(sending_days, d):
             count += 1
     return d
 
@@ -514,6 +540,9 @@ async def reserve_slots_for_lead(
     current_date = next_business_date(start_date, sending_days, 0)
     if current_date < today:
         current_date = next_business_date(today, sending_days, 0)
+    if current_date < today:
+        log.info("No eligible selected date remains for campaign=%s lead=%s", campaign.id, lead_id)
+        return
     scheduled_dates: List[date] = []
     round_robin = campaign_lead_id % len(inboxes) if inboxes else 0
 
@@ -628,9 +657,9 @@ async def reserve_slots_for_lead(
                     "  -> seq=%d: inbox full on follow-up date %s; advancing to next business day",
                     idx, current_date
                 )
-                current_date += timedelta(days=1)
-                while current_date.weekday() not in sending_days:
-                    current_date += timedelta(days=1)
+                current_date = _next_scheduled_date(sending_days, current_date)
+                if current_date is None:
+                    return
                 continue
             
             if picked is not None:
@@ -687,9 +716,9 @@ async def reserve_slots_for_lead(
                                     "  -> seq=%d: chained base %s past window end %s; moving to next day",
                                     idx, base_local_dt.strftime("%H:%M:%S"), end_time.strftime("%H:%M"),
                                 )
-                                current_date += timedelta(days=1)
-                                while current_date.weekday() not in sending_days:
-                                    current_date += timedelta(days=1)
+                                current_date = _next_scheduled_date(sending_days, current_date)
+                                if current_date is None:
+                                    return
                                 continue
                             # Apply jitter to the (possibly chained) base; guard against window overflow.
                             jittered_local_dt = _apply_jitter(base_local_dt, inbox_obj)
@@ -710,9 +739,9 @@ async def reserve_slots_for_lead(
                                 "  -> no slot left today for seq=%d (window ended/full); moving to next day",
                                 idx,
                             )
-                            current_date += timedelta(days=1)
-                            while current_date.weekday() not in sending_days:
-                                current_date += timedelta(days=1)
+                            current_date = _next_scheduled_date(sending_days, current_date)
+                            if current_date is None:
+                                return
                             continue
                     else:
                         # Grid time is still in the future — chain from the last jittered slot
@@ -723,9 +752,9 @@ async def reserve_slots_for_lead(
                             else datetime.combine(current_date, est_time)
                         )
                         if base_local_dt.time() > end_time:
-                            current_date += timedelta(days=1)
-                            while current_date.weekday() not in sending_days:
-                                current_date += timedelta(days=1)
+                            current_date = _next_scheduled_date(sending_days, current_date)
+                            if current_date is None:
+                                return
                             continue
                         jittered_local_dt = _apply_jitter(base_local_dt, inbox_obj)
                         if jittered_local_dt > end_boundary:
@@ -745,9 +774,9 @@ async def reserve_slots_for_lead(
                             "  -> seq=%d pos=%d base would send at %s (past %s); moving to next day",
                             idx, pos, base_local_dt.strftime("%H:%M"), end_time.strftime("%H:%M"),
                         )
-                        current_date += timedelta(days=1)
-                        while current_date.weekday() not in sending_days:
-                            current_date += timedelta(days=1)
+                        current_date = _next_scheduled_date(sending_days, current_date)
+                        if current_date is None:
+                            return
                         continue
                     jittered_local_dt = _apply_jitter(base_local_dt, inbox_obj)
                     if jittered_local_dt > end_boundary:
@@ -793,9 +822,9 @@ async def reserve_slots_for_lead(
                 break
             
             # Advance to next business day (for both first emails and follow-ups)
-            current_date += timedelta(days=1)
-            while current_date.weekday() not in sending_days:
-                current_date += timedelta(days=1)
+            current_date = _next_scheduled_date(sending_days, current_date)
+            if current_date is None:
+                return
 
         if safety >= 365:
             log.warning(
@@ -1767,5 +1796,10 @@ async def recalculate_queue_round_robin(
         "(batch_size=%d, total_capacity=%d/day)",
         total_reserved, num_campaigns, batch_size, total_daily_capacity,
     )
+
+
+
+
+
 
 

@@ -9,6 +9,8 @@ const allowedHostsExtra = (process.env.VITE_ALLOWED_HOSTS || '')
 export default defineConfig({
   plugins: [react()],
   server: {
+    port: 7000,
+    strictPort: true,
     // Public dev hostname (e.g. behind host Caddy → docker-compose-not-host.dev.yml).
     // Add more via VITE_ALLOWED_HOSTS in .env_dev (comma-separated).
     allowedHosts: ['localhost', '127.0.0.1', ...allowedHostsExtra],

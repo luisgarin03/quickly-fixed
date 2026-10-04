@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest
+pytest-asyncio
+debugpy
+# Windows does not ship an IANA timezone database.
+tzdata

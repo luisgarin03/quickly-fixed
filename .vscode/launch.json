@@ -1,18 +1,27 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Python: FastAPI (Debug Console)",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "app.main:app",
-                "--reload"
-            ],
-            "jinja": true,
-            "justMyCode": true,
-            "console": "internalConsole"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: FastAPI (Debug Console)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload"],
+      "jinja": true,
+      "justMyCode": true,
+      "console": "internalConsole"
+    },
+    {
+      "name": "Quickly local backend",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {"TEST_MODE": "true"},
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8000", "--log-level", "info"],
+      "justMyCode": false
+    }
+  ]
 }

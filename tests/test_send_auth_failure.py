@@ -329,3 +329,32 @@ async def test_one_click_unsubscribe_flag_comes_from_campaign(session, monkeypat
 
     assert captured["list_unsubscribe_one_click"] is False
     assert captured["list_unsubscribe_url"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("worker", ["send_slot_job", "run_send_job"])
+async def test_new_york_worker_uses_utc_inside_explicit_window(session, monkeypatch, worker):
+    campaign = await make_campaign(session, sending_days=["2026-10-04"],
+                                   sending_hours_start="18:29", sending_hours_end="18:32")
+    campaign.timezone = "America/New_York"
+    inbox = await _make_smtp_inbox(session)
+    slot = await _make_due_slot(session, inbox, campaign)
+    slot.scheduled_date = datetime(2026, 10, 4, 22, 29)
+    await session.flush()
+    monkeypatch.setattr(jobs_mod.time_provider, "now", lambda: datetime(2026, 10, 4, 18, 30))
+    monkeypatch.setattr(jobs_mod.time_provider, "utcnow", lambda: datetime(2026, 10, 4, 22, 30))
+    monkeypatch.setattr(jobs_mod, "AsyncSessionLocal", lambda: _SessionCtx(session))
+    calls = []
+    def fake_send(**kwargs):
+        calls.append(kwargs)
+        return SendResult(message_id="utc-regression", thread_id="utc-thread")
+    async def fake_webhook(*args, **kwargs):
+        pass
+    monkeypatch.setattr(jobs_mod, "send_email", fake_send)
+    monkeypatch.setattr(jobs_mod, "fire_webhook_event", fake_webhook)
+    jobs_mod._inbox_auth_cooldown_until.clear()
+    if worker == "send_slot_job":
+        await jobs_mod.send_slot_job(slot.id)
+    else:
+        await jobs_mod.run_send_job()
+    assert len(calls) == 1
+    assert (await session.execute(select(func.count(QueueSlot.id)))).scalar() == 0

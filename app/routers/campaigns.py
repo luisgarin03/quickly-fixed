@@ -56,7 +56,10 @@ from app.schemas import (
 )
 from app.lead_inbox_resolution import from_inbox_email_by_lead_campaign
 from app.routers.leads import _fetch_lead_interactions_batch
-from app.queue_logic import reserve_slots_for_new_leads_bulk
+from app.queue_logic import (
+    reserve_slots_for_new_leads_bulk,
+    recalculate_queue_after_sequence_change_for_leads,
+)
 
 log = logging.getLogger("quickly.routes")
 
@@ -821,6 +824,35 @@ async def delete_sequence(
 
         enqueue_global_recalculate(background_tasks)
     return {"ok": True}
+
+
+@router.post("/{campaign_id}/recalculate-queue")
+async def recalculate_campaign_queue(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild this campaign's queue without duplicating existing slots."""
+    campaign = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    cl_result = await db.execute(
+        select(CampaignLead.id).where(CampaignLead.campaign_id == campaign_id)
+    )
+    cl_ids = [row[0] for row in cl_result.all()]
+    if not cl_ids:
+        return {"ok": True, "campaign_id": campaign_id, "leads": 0, "slots": 0}
+    await recalculate_queue_after_sequence_change_for_leads(db, cl_ids)
+    await db.commit()
+    slot_count = await db.execute(
+        select(func.count(QueueSlot.id))
+        .join(CampaignLead, QueueSlot.campaign_lead_id == CampaignLead.id)
+        .where(CampaignLead.campaign_id == campaign_id)
+    )
+    count = slot_count.scalar() or 0
+    result = {"ok": True, "campaign_id": campaign_id, "leads": len(cl_ids), "slots": count}
+    if not count:
+        result["reason"] = "No eligible send slot remains; check selected dates, window, lead eligibility and inbox capacity."
+    return result
 
 
 # ---- Sequence Variants (A/B testing) ----
@@ -1684,7 +1716,7 @@ async def send_test_email(
     if getattr(inbox, "provider", "") == "gmail":
         from app.models import GmailAccount
         ga_result = await db.execute(
-            select(GmailAccount).where(GmailAccount.email == inbox.email)
+            select(GmailAccount).where(GmailAccount.inbox_id == inbox.id)
         )
         gmail_account = ga_result.scalar_one_or_none()
 
@@ -2051,7 +2083,10 @@ async def bulk_add_leads_to_campaign(
         try:
             # Find or create lead by email
             lead_result = await db.execute(select(Lead).where(Lead.email == email))
-            lead = lead_result.scalar_one_or_none()
+            # Older local databases may contain duplicate rows from before the
+            # email uniqueness constraint was enforced. Use a deterministic
+            # existing row instead of failing the whole add operation.
+            lead = lead_result.scalars().first()
             if not lead:
                 lead = Lead(
                     email=email,
@@ -2079,7 +2114,7 @@ async def bulk_add_leads_to_campaign(
                 existing_any = await db.execute(
                     select(CampaignLead).where(CampaignLead.lead_id == lead.id)
                 )
-                if existing_any.scalar_one_or_none():
+                if existing_any.scalars().first():
                     duplicate_leads.append(email)
                     results.append({"email": email, "status": "already_enrolled"})
                     already_enrolled += 1
@@ -2092,7 +2127,7 @@ async def bulk_add_leads_to_campaign(
                         CampaignLead.lead_id == lead.id,
                     )
                 )
-                if existing_cl.scalar_one_or_none():
+                if existing_cl.scalars().first():
                     results.append({"email": email, "status": "already_enrolled"})
                     already_enrolled += 1
                     continue

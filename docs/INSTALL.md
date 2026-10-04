@@ -442,7 +442,7 @@ cp .env.example .env
 docker compose -f docker-compose.dev.yml up
 ```
 
-Open `http://localhost:5173` — the frontend hot-reloads on changes; the backend reloads on Python changes.
+Open `http://localhost:7000` — the frontend hot-reloads on changes; the backend reloads on Python changes.
 
 **No Caddy in Compose (prebuilt-style UI):** `docker compose -f docker-compose.no-caddy.dev.yml up` uses **`.env_dev`**, Postgres on host **5435**, API on **8002**, Vite on **5175**, and **`QUICKLY_PREBUILT_IMAGE=1`** like the Docker Hub image. **`docker-compose-not-host.dev.yml`** is similar but keeps port **5051** for a local host Caddy `reverse_proxy` and uses the external **`quickly_pgdata_dev`** volume.
 
@@ -506,7 +506,7 @@ uvicorn app.main:app --reload
 cd frontend
 npm install
 npm run dev
-# UI available at http://localhost:5173 — proxies /api calls to localhost:8000
+# UI available at http://localhost:7000 — proxies /api calls to localhost:8000
 ```
 
 ### Running Tests
@@ -939,7 +939,7 @@ The PostgreSQL Docker volume keeps your data across updates (`quickly_pgdata` fo
 |`OFFICE365_CLIENT_SECRET`|For Office 365|—|Microsoft Entra app client secret — [see Step 3B](#step-3b-connect-office-365--outlook-inboxes)|
 |`OFFICE365_TENANT_ID`|No|`common`|Use `common` for multi-tenant, or your specific tenant ID — [see Step 3B](#step-3b-connect-office-365--outlook-inboxes)|
 |`QUICKLY_SECRET_KEY`|No|auto-generated|JWT signing key — **set this** or sessions reset on every restart|
-|`CORS_ORIGINS`|No|`http://localhost:5173,...`|Comma-separated allowed CORS origins|
+|`CORS_ORIGINS`|No|`http://localhost:7000,...`|Comma-separated allowed CORS origins|
 |`QUICKLY_LOCAL_DISK_BACKUPS`|No|_(off)_|Set to `1` or `true` to allow saving backups under a folder in **Settings → Setup → Backup** (default `backups/` under the app directory). The **docker-compose\*.yml** files in this repo (including **`docker-compose.no-caddy.yml`**) set this and mount **`./backups:/app/backups`**. The app keeps the **10** newest backup files (`.qbk` wrapper format). PaaS without a volume: use **webhook** instead.|
 |`QUICKLY_PREBUILT_IMAGE`|No|`1` in Docker image|When `1`/`true`/`yes`, the inbox UI hides CNAME-to-Quickly custom tracking setup so operators use **Beacon** instead. **`docker-compose.dev.yml`** sets `0` (CNAME UI visible while hacking). Production **`docker-compose-not-host.yml`** sets `0` for legacy host-Caddy + CNAME tracking. **`docker-compose.no-caddy.yml`**, **`docker-compose.no-caddy.dev.yml`**, and **`docker-compose-not-host.dev.yml`** set `1` to mirror the prebuilt image.|
 |`QUICKLY_TRACKING_CNAME_UI`|No|_(off)_|Set to `1`/`true`/`yes` to **show** the CNAME custom tracking UI even when `QUICKLY_PREBUILT_IMAGE=1` (advanced / host-Caddy setups).|
